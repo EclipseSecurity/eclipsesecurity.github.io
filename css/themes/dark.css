@@ -1,0 +1,24 @@
+:root{
+  --bg:#071018;
+  --card:#0b1418;
+  --text:#dffcf0;
+  --muted:#9fb6b0;
+  --accent:#8aff9a;
+  --accent-2:#49e07a;
+}
+body.theme-dark{background:linear-gradient(180deg,#041018 0%,#071824 60%);color:var(--text)}
+.theme-dark .site-header{border-bottom:1px solid rgba(138,255,154,0.06)}
+.theme-dark .logo{color:var(--accent)}
+.theme-dark .nav a{color:var(--muted)}
+.theme-dark .nav .cta{background:var(--accent);color:#071024}
+.theme-dark .card{background:rgba(255,255,255,0.02)}
+.theme-dark .post{background:linear-gradient(180deg, rgba(5,8,10,0.6), rgba(3,6,8,0.4));border-left:4px solid rgba(138,255,154,0.08)}
+.theme-dark .post .tag{background:rgba(138,255,154,0.06);color:var(--accent)}
+.theme-dark .blog-hero .title{color:var(--accent)}
+.theme-dark .blog-hero .cursor{background:var(--accent)}
+.theme-dark pre{background:#021014;color:var(--accent)}
+.theme-dark .featured .hero-card{background:linear-gradient(180deg, rgba(8,12,10,0.6), rgba(4,6,6,0.4));border-left:4px solid var(--accent)}
+.theme-dark .post-search input{background:#031218;color:var(--text);border:1px solid rgba(138,255,154,0.04)}
+.theme-dark .post-search button{background:transparent;color:var(--accent);border:1px solid rgba(138,255,154,0.06)}
+.theme-dark .tag-btn{border:1px solid rgba(138,255,154,0.04);color:var(--muted)}
+.theme-dark .tag-btn.active{background:var(--accent);color:#071024;border-color:var(--accent)}
