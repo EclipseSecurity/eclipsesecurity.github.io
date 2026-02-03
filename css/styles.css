@@ -839,9 +839,9 @@ code{font-family:inherit;font-size:inherit}
   border-top:1px solid var(--border-subtle);
 }
 .post-back a{
-  color:var(--text-muted);
+  color:var(--accent);
   font-size:14px;
 }
 .post-back a:hover{
-  color:var(--text);
+  color:var(--accent-hover);
 }
