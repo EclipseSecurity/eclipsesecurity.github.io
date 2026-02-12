@@ -16,6 +16,16 @@
 
 const TOOLS = [
   {
+    name: "Cobalt Strike Linux Beacon",
+    tagline: "Proof of Concept (PoC) custom Cobalt Strike Linux Beacon",
+    description: "Custom Linux Beacon that supports HTTP/S listeners with built-in commands, BOF support, and SOCKS proxy",
+    tags: ["Linux", "Tooling"],
+    githubUrl: "https://github.com/EricEsquivel/CobaltStrike-Linux-Beacon",
+    language: "C",
+    platform: "Linux",
+    status: "Active"
+  },
+  {
     name: "GhostKatz",
     tagline: "Kernel-Assisted LSASS Dumping",
     description: "Dump LSASS via physical memory read primitives in vulnerable kernel drivers",
@@ -57,7 +67,7 @@ const TOOLS = [
   },
   {
     name: "Inline-EA",
-    tagline: "Beacon Object File (BOF)",
+    tagline: "Post-Exploitation Beacon Object File (BOF)",
     description: "Cobalt Strike BOF for evasive .NET assembly executions",
     tags: ["Windows", "Tooling", "Opsec"],
     githubUrl: "https://github.com/EricEsquivel/Inline-EA",
