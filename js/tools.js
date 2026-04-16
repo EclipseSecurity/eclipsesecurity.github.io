@@ -75,6 +75,16 @@ const TOOLS = [
     platform: "Windows",
     status: "Active"
   },
+  {
+    name: "DSCourier",
+    tagline: "Code Execution via WinGet DSC COM API",
+    description: "Executes arbitrary PowerShell inside a Microsoft-signed process by invoking the WinGet Configuration engine directly through its COM API, removing winget.exe from the process tree entirely.",
+    tags: ["Windows", "Research"],
+    githubUrl: "https://github.com/DylanDavis1/DSCourier",
+    language: "C#",
+    platform: "Windows",
+    status: "Active"
+  },
 ];
 
 // State
