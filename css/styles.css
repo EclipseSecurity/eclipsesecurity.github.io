@@ -276,6 +276,17 @@ pre{
   margin:16px 0;
 }
 [data-theme="dark"] pre{background:#0d1117}
+pre::-webkit-scrollbar{height:6px}
+pre::-webkit-scrollbar-track{background:transparent}
+pre::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+pre::-webkit-scrollbar-thumb:hover{background:var(--text-muted)}
+pre{scrollbar-width:thin;scrollbar-color:var(--border) transparent}
+pre.process-tree{
+  padding:24px 28px;
+  font-size:14px;
+  line-height:2;
+  letter-spacing:0.01em;
+}
 code{font-family:inherit;font-size:inherit}
 
 /* Featured Post */
@@ -809,6 +820,7 @@ code{font-family:inherit;font-size:inherit}
   margin-bottom:14px;
 }
 .post-article p{
+  font-size:15px;
   line-height:1.7;
   margin-bottom:18px;
   color:var(--text-muted);
@@ -820,8 +832,6 @@ code{font-family:inherit;font-size:inherit}
 }
 .post-article section{
   margin-top:36px;
-  padding-left:16px;
-  border-left:2px solid var(--border-subtle);
 }
 .post-article section h2{
   margin:0 0 12px;
@@ -832,6 +842,70 @@ code{font-family:inherit;font-size:inherit}
 }
 .post-article section p:last-child{
   margin-bottom:0;
+}
+.post-article ul,
+.post-article ol{
+  margin:12px 0 16px;
+  padding-left:24px;
+}
+.post-article ul{
+  list-style:disc;
+}
+.post-article ol{
+  list-style:decimal;
+}
+.post-article li{
+  font-size:15px;
+  margin-bottom:8px;
+  line-height:1.7;
+  color:var(--text-muted);
+}
+.post-article li:last-child{
+  margin-bottom:0;
+}
+.def-list{
+  margin:16px 0;
+  display:flex;
+  flex-direction:column;
+  border:1px solid var(--border-subtle);
+  border-radius:8px;
+  overflow:hidden;
+}
+.def-item{
+  display:grid;
+  grid-template-columns:200px 1fr;
+  border-bottom:1px solid var(--border-subtle);
+}
+.def-item:last-child{
+  border-bottom:none;
+}
+.def-item dt{
+  padding:12px 16px;
+  font-size:13px;
+  font-weight:600;
+  color:var(--text);
+  font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+  border-right:1px solid var(--border-subtle);
+  word-break:break-word;
+}
+.def-item dt code{
+  font-family:inherit;
+  font-size:inherit;
+  color:inherit;
+}
+.def-item dd{
+  padding:12px 16px;
+  font-size:14px;
+  line-height:1.65;
+  color:var(--text-muted);
+}
+.post-article .img-caption{
+  font-size:12px;
+  color:var(--text-muted);
+  opacity:0.7;
+  margin-top:-8px;
+  margin-bottom:16px;
+  line-height:1.5;
 }
 .post-back{
   margin-top:40px;
