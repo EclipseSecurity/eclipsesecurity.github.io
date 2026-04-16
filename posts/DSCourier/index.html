@@ -39,7 +39,7 @@
         </header>
 
         <article class="post-article">
-          <p>The abuse of Windows Package Manager (WinGet) as a living-off-the-land binary is not a new concept. Prior research, such as <a href="https://zeronsec.com" target="_blank" rel="noreferrer">Zero Salarium's work</a> in December 2024, demonstrated that <code>winget.exe</code> can serve as a proxy for PowerShell execution through its <code>configure</code> subcommand.</p>
+          <p>The abuse of Windows Package Manager (WinGet) as a living-off-the-land binary is not a new concept. Prior research, such as <a href="https://www.zerosalarium.com/2024/12/LOLBIN%20WinGet%20execute%20PowerShell%20script.html" target="_blank" rel="noreferrer">Zero Salarium's work</a> in December 2024, demonstrated that <code>winget.exe</code> can serve as a proxy for PowerShell execution through its <code>configure</code> subcommand.</p>
 
           <p>This post takes that concept further. Instead of calling <code>winget.exe</code>, we invoke the WinGet Configuration engine directly through its <strong>COM API</strong>, completely removing the CLI process from the execution chain. The result is arbitrary code execution inside a Microsoft-signed process with no <code>winget.exe</code>, no <code>powershell.exe</code>, and no <code>cmd.exe</code> in the process tree.</p>
 
