@@ -54,6 +54,16 @@
           <p>This post takes that concept further. Instead of calling <code>winget.exe</code>, we invoke the WinGet Configuration engine directly through its <strong>COM API</strong>, completely removing the CLI process from the execution chain. The result is arbitrary code execution inside a Microsoft-signed process with no <code>winget.exe</code>, no <code>powershell.exe</code>, and no <code>cmd.exe</code> in the process tree.</p>
 
           <section>
+            <h2>Requirements</h2>
+            <p>Before getting into the specifics, for this to work for both the classic configure method and our COM approach, a few things are needed on the target machine:</p>
+            <ol>
+              <li>Windows 10 version 1809 (build 17763) or later, Windows 11, or Windows Server 2025.</li>
+              <li>WinGet (shouldn't be a surprise), but specifically version v1.6.2631 or later. This is needed for configuration support.</li>
+              <li>WinGet's full package (not just the stub package). By default, WinGet installs as a small stub. Running <code style="text-decoration:underline;">winget configure --enable</code> downloads the full package with configuration support.</li>
+            </ol>
+          </section>
+
+          <section>
             <h2>What is WinGet?</h2>
             <p><a href="https://learn.microsoft.com/en-us/windows/package-manager/winget/" target="_blank" rel="noreferrer">WinGet</a> is Microsoft's official package manager for Windows. Think of apt on Debian or brew on MacOS, it lets you search for, install, update, and remove software directly from the terminal without navigating download pages or running a GUI installer.</p>
             <p>What makes WinGet relevant here is its availability. It ships natively with modern versions of Windows 10, 11 and Windows Server 2025, making it a candidate for living-off-the-land abuse. Many administrators know it for installing software, but WinGet also includes a <strong>configure</strong> subcommand that can apply machine configurations from YAML files (including executing PowerShell). That capability is where things get a bit interesting.</p>
