@@ -1,0 +1,422 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>ShareSift: ML-Augmented SMB Share Hunting</title>
+    <!-- Open Graph -->
+    <meta property="og:title" content="ShareSift: ML-Augmented SMB Share Hunting">
+    <meta property="og:description" content="Snaffler fires 1,279 times on Metasploitable 3. Seven are real. A LightGBM path classifier and fine-tuned Qwen3-1.7B LoRA that fixes the precision problem.">
+    <meta property="og:image" content="https://eclipsesec.com/img/EclipseSec-og.png">
+    <meta property="og:url" content="https://eclipsesec.com/posts/ShareSift/">
+    <meta property="og:type" content="article">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="ShareSift: ML-Augmented SMB Share Hunting">
+    <meta name="twitter:description" content="Snaffler fires 1,279 times on Metasploitable 3. Seven are real. A LightGBM path classifier and fine-tuned Qwen3-1.7B LoRA that fixes the precision problem.">
+    <meta name="twitter:image" content="https://eclipsesec.com/img/EclipseSec-og.png">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/css/styles.css">
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="container header-inner">
+        <a class="logo" href="/">EclipseSec</a>
+        <nav class="nav">
+          <div class="nav-links">
+            <a href="/">Blog</a>
+            <a href="/tools/">Tools</a>
+            <a href="/about/">About</a>
+          </div>
+          <button class="theme-toggle" aria-label="Toggle theme">
+            <svg class="sun-icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+            <svg class="moon-icon" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+          </button>
+          <a href="https://github.com/EclipseSecurity" class="github-link" target="_blank" rel="noreferrer" aria-label="GitHub">
+            <svg viewBox="0 0 24 24"><path d="M12 0.5a12 12 0 0 0-3.79 23.4c.6.11.82-.26.82-.58v-2.02c-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.09-.74.08-.73.08-.73 1.21.09 1.85 1.24 1.85 1.24 1.07 1.84 2.8 1.31 3.49 1 .11-.78.42-1.31.76-1.61-2.66-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.12-.3-.54-1.52.12-3.16 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.29-1.55 3.3-1.23 3.3-1.23.66 1.64.24 2.86.12 3.16.77.84 1.24 1.91 1.24 3.22 0 4.61-2.81 5.62-5.49 5.92.43.38.82 1.11.82 2.24v3.32c0 .32.22.69.82.58A12 12 0 0 0 12 0.5z"/></svg>
+          </a>
+          <button class="nav-toggle" aria-label="Toggle navigation" aria-expanded="false">
+            <span></span><span></span><span></span>
+          </button>
+        </nav>
+      </div>
+    </header>
+
+    <main class="container">
+      <div class="post-container">
+        <header class="post-header">
+          <h1>ShareSift: ML-Augmented SMB Share Hunting</h1>
+          <div class="meta">By <strong>Vincent Dinh</strong> &bull; <time datetime="2026-06-07">Jun 7, 2026</time> &bull; <span class="tag">Tooling</span></div>
+        </header>
+
+        <article class="post-article">
+          <p>This is a tool announcement and a build log. I built ShareSift because Snaffler's false positive rate is a real problem on engagements, and I wanted to see whether ML could fix it. The short answer is yes &mdash; but getting the evaluation right was harder than building the model.</p>
+
+          <section>
+            <h2>Snaffler hits 1,279 times. Seven are real.</h2>
+            <p>If you've used Snaffler on an engagement, you know the drill. You run it against a share, get a wall of output, and spend the next hour triaging noise. Most of it is PowerShell scripts from public packages, tutorial code, parameter declarations &mdash; anything that contains the word "password" in any context.</p>
+            <p>Run Snaffler against Metasploitable 3 and it fires 1,279 times. About seven of those contain actual credentials. The other 1,272 are Boxstarter installer scripts.</p>
+            <p>The rule doing most of the damage is <code>KeepPassOrKeyInCode</code>. It fires 686 times on its own, on files like these:</p>
+            <pre><code># This fires KeepPassOrKeyInCode:
+schtasks /CREATE ... /RP "$password" /XML "$taskFile"
+
+# So does this:
+.EXAMPLE   PS C:\&gt; Set-SecureAutoLogon -Password (Read-Host -AsSecureString)
+
+# And this:
+$script:BoxstarterPassword='$($script:BoxstarterPassword)'</code></pre>
+            <p>Snaffler's regex matches <code>password="$variable"</code> the same as <code>password="Ok6/FqR5="</code>. It doesn't inspect the right-hand side. That's not a bug &mdash; it's the hard limit of what regex can do here. Snaffler knows the file has "password" in it. It doesn't know whether that password is real.</p>
+            <p>Sort by Snaffler's own tier field and look at the first ten results. Top-10 precision is 0.000. You're reading Boxstarter tutorial code.</p>
+            <p>ShareSift's Top-10 precision on the same share: 0.800.</p>
+            <figure>
+              <img src="https://vincent03dinh.wordpress.com/wp-content/uploads/2026/06/image-1.png?w=724" alt="Top-10 precision on Metasploitable 3: Snaffler returns 0 of 10 real credentials while ShareSift returns 8 of 10." style="max-width:100%;border-radius:8px;display:block;margin:16px 0;">
+              <figcaption class="img-caption">Top-10 precision on Metasploitable 3: Snaffler 0/10 vs ShareSift 8/10.</figcaption>
+            </figure>
+          </section>
+
+          <section>
+            <h2>What ShareSift is</h2>
+            <p>ShareSift is a two-stage ML pipeline for credential hunting in SMB file shares. It plugs into pysnaffler as a custom classifier and adds a path model and a content model on top. It also ships with live credential verification, an interactive HTML report, and a full engagement datastore designed for multi-day pentests.</p>
+            <p>Stage 1 is a LightGBM path classifier. It scores every path the share enumerator finds. Inference runs in under a millisecond. The artifact is 15MB and needs no GPU. Paths that score above a tier threshold get forwarded to Stage 2. Everything else gets dropped.</p>
+            <p>Stage 2 is a fine-tuned Qwen3 1.7B model. It reads the file content and returns a probability that the file contains a literal credential value &mdash; not a reference to one, not a mention of one, but an actual value someone could use. It only runs on paths Stage 1 flagged, typically a few hundred out of millions.</p>
+            <figure>
+              <img src="https://vincent03dinh.wordpress.com/wp-content/uploads/2026/06/screenshot_20260610_223118.png?w=563" alt="ShareSift two-stage pipeline: LightGBM path classifier drops ~99% of paths, then Qwen3 1.7B content model reads what survives." style="max-width:100%;border-radius:8px;display:block;margin:16px 0;">
+              <figcaption class="img-caption">The two-stage pipeline: a fast LightGBM path classifier drops ~99% of paths, then a Qwen3 1.7B content model reads what survives.</figcaption>
+            </figure>
+            <p>On content classification, ShareSift outperforms Wiz's published Llama recipe by 12.7 points in precision, 13.8 in recall, and 13.3 in F1. Those numbers are on ShareSift's own held-out test split, not a shared benchmark. On a neutral external benchmark &mdash; Samsung's CredData &mdash; a larger Mistral-7B recipe still beats ShareSift's best content classifier, so read the in-distribution win as a deployment result, not a state-of-the-art claim.</p>
+          </section>
+
+          <section>
+            <h2>Why these models</h2>
+
+            <h3>LightGBM, not a transformer</h3>
+            <p>I didn't start with LightGBM. The first instinct when building an ML layer for a security tool is to reach for a transformer. That was the wrong call for this task, and the ablations confirm it.</p>
+            <p>Paths are 20 to 80 characters of highly structured tokens: server names, share names, directory components, filenames, extensions. A large encoder's main advantages &mdash; long context, code-aware pretraining &mdash; are mostly wasted at this length. What matters is whether the model learns nonlinear interactions between features like extension, depth, directory keywords, and path shape.</p>
+            <p>I tested five configurations. P0 is the shipped model: char n-grams (3&ndash;5) plus 8 hand-crafted features, LightGBM, isotonic calibration. PR-AUC 0.9731.</p>
+            <p>Remove the hand features (P1) and PR-AUC drops 3.3 points. Remove the n-grams entirely and keep only hand features (P2) and PR-AUC drops 17.1 points &mdash; F1 collapses near zero. N-grams are the primary signal. Swap LightGBM for logistic regression on the same features (P3) and PR-AUC drops 4.1 points. The nonlinear interactions matter.</p>
+            <p>There's also a calibration wrinkle worth knowing about. Removing calibration (P4) actually improves raw F1 at the 0.5 threshold &mdash; but probability quality drops with it. The tier-band mapping (Black above 0.95, Red above 0.80, Yellow above 0.50) needs well-calibrated probabilities, not raw classification accuracy. Uncalibrated probabilities break the tiers.</p>
+            <p>The shipped model is the smallest thing that works at the quality level the tier bands require. It runs in under a millisecond per path and fits in 15MB. A transformer encoder would cost roughly 1,000&times; more per inference for no measurable gain on this task.</p>
+
+            <h3>Qwen3 1.7B, not Llama</h3>
+            <p>Wiz's April 2025 secrets-detection blog used a Llama 3.2 1B LoRA recipe. I replicated it on Qwen3 1.7B instead.</p>
+            <p>Distil Labs' 2025 SLM benchmark puts Qwen3 1.7B at 91.3% classification accuracy versus Llama 3.2 1B at 86.7%. Wiz's own pre-finetune numbers show Qwen at 143 tokens/sec versus Llama at 27. Wiz chose Llama because its pre-finetune recall was marginally higher. LoRA training closes that gap. Qwen3 is Apache-2.0 and has stronger code tokenization for the file-content distribution I'm classifying.</p>
+            <p>Fine-tuning used Unsloth at LoRA rank 16, alpha 32, 7 epochs, lr 2e-4, cosine schedule. The rank sweep confirmed 16 is the right size: rank 8 underfits by 3.5 points in F1, and ranks 32 and 64 match rank 16 without improving it.</p>
+          </section>
+
+          <section>
+            <h2>Building the training data</h2>
+            <p>No public dataset of SMB share paths with pentester-grade sensitivity labels exists. Corporate share topology is NDA-walled by nature &mdash; the paths that matter most on an engagement are the ones nobody publishes. I built training data from four sources.</p>
+            <p><strong>Public corpus mining.</strong> GitHub Code Search, ServerFault, SuperUser, and Stack Overflow together have tens of millions of posts where real engineers reference real UNC paths in real scripts. I pulled 11,190 unique candidate paths using authenticated API access and per-query SHA256 caches for reproducibility. The Stack Overflow extraction required fixing a format bug mid-run: SO's 2024 data dump uses pipe-delimited tags instead of angle brackets, which caused the first 40-minute run to produce zero results.</p>
+            <p><strong>Synthetic generation.</strong> Seven passes produced 1,851 records using ChatGPT, DeepSeek, and a local Qwen model. Getting useful synthetic data meant learning five rules the hard way.</p>
+            <p>Generate one class at a time. Ask for a "mix" and you get whatever ratio the model prefers &mdash; observed at roughly 20% positive, heavily skewed toward easy negatives. You have to set the ratio deliberately.</p>
+            <p>Supply server and share names. Left to its own, the model produced <code>meridian-fs01</code> and <code>corp-nas-02</code> for twenty consecutive paths. A model trained on two fictional server names learns those names as a signal. That's not useful.</p>
+            <p>Name every quality dimension explicitly. Mechanism variety only appeared when I demanded it. The model defaults to the easiest member of every class.</p>
+            <p>Use thinking mode only for hard negatives. For genuinely ambiguous paths &mdash; ones that would make a careful analyst pause &mdash; fast mode cheated by including folder names like <code>Templates/</code> or <code>Training/</code> that resolve the ambiguity. Thinking mode obeyed the constraint.</p>
+            <p>Regex-tier tokens are banned from the hard negative class. A synthetic negative containing <code>id_rsa</code> or <code>.kdbx</code> teaches the model to discount near-certain positives. The exclusion is enforced through the same callable the eval pipeline's contamination validator uses, so the list can't drift.</p>
+            <p><strong>Labeling.</strong> A rule-based labeler cross-referenced Snaffler's TOML rules and Kingfisher's 942 detectors for baseline labels. Codex audited multiple passes. Combined agreement rate was 88%. The guidelines encode 14 sensitivity categories &mdash; from <code>private_keys_x509</code> and <code>ssh_credentials</code> down to <code>decoy_docs</code> and <code>benign_noise</code> &mdash; with explicit tier criteria and boundary calls for ambiguous cases.</p>
+          </section>
+
+          <section>
+            <h2>I caught my own data leak before publishing</h2>
+            <p>Before writing up the results, I ran an integrity audit on the eval pipeline. It found a real problem.</p>
+            <p>The content classifier's test set had 43 records that leaked from training via cluster-level proximity. The splitting logic had partitioned by record, not by semantic cluster &mdash; records that were near-duplicates of training examples could appear in the test set and inflate measured performance. The original headline was "beats Wiz by 3&ndash;5 points on the held-out test set." That claim was real on its measurement, but the measurement was wrong.</p>
+            <p>The audit checked cross-split overlap at exact match and Jaccard similarity thresholds, training-to-test contamination at varying thresholds, and label source provenance.</p>
+            <table style="width:100%;border-collapse:collapse;margin:16px 0;font-size:0.9em;">
+              <thead>
+                <tr style="border-bottom:2px solid currentColor;">
+                  <th style="text-align:left;padding:8px 12px;">Severity</th>
+                  <th style="text-align:left;padding:8px 12px;">Before</th>
+                  <th style="text-align:left;padding:8px 12px;">After</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr style="border-bottom:1px solid rgba(128,128,128,0.3);">
+                  <td style="padding:8px 12px;">Error</td>
+                  <td style="padding:8px 12px;">2</td>
+                  <td style="padding:8px 12px;">0</td>
+                </tr>
+                <tr style="border-bottom:1px solid rgba(128,128,128,0.3);">
+                  <td style="padding:8px 12px;">Warning</td>
+                  <td style="padding:8px 12px;">3</td>
+                  <td style="padding:8px 12px;">0</td>
+                </tr>
+              </tbody>
+            </table>
+            <p>The fix was a cluster-level splitter. Records in the same semantic cluster go entirely to train or entirely to test, never split across the boundary. Zero cross-split overlap at Jaccard 0.8, enforced at split time.</p>
+            <p>I retrained from scratch on the clean split and swept epoch count.</p>
+            <table style="width:100%;border-collapse:collapse;margin:16px 0;font-size:0.9em;">
+              <thead>
+                <tr style="border-bottom:2px solid currentColor;">
+                  <th style="text-align:left;padding:8px 12px;">Epochs</th>
+                  <th style="text-align:left;padding:8px 12px;">Precision</th>
+                  <th style="text-align:left;padding:8px 12px;">Recall</th>
+                  <th style="text-align:left;padding:8px 12px;">F1</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr style="border-bottom:1px solid rgba(128,128,128,0.3);">
+                  <td style="padding:8px 12px;">3</td>
+                  <td style="padding:8px 12px;">0.816</td>
+                  <td style="padding:8px 12px;">0.820</td>
+                  <td style="padding:8px 12px;">0.818</td>
+                </tr>
+                <tr style="border-bottom:1px solid rgba(128,128,128,0.3);">
+                  <td style="padding:8px 12px;">5</td>
+                  <td style="padding:8px 12px;">0.978</td>
+                  <td style="padding:8px 12px;">0.926</td>
+                  <td style="padding:8px 12px;">0.951</td>
+                </tr>
+                <tr style="border-bottom:1px solid rgba(128,128,128,0.3);">
+                  <td style="padding:8px 12px;">7 (shipped)</td>
+                  <td style="padding:8px 12px;">0.984</td>
+                  <td style="padding:8px 12px;">0.958</td>
+                  <td style="padding:8px 12px;">0.971</td>
+                </tr>
+                <tr>
+                  <td style="padding:8px 12px;">10</td>
+                  <td style="padding:8px 12px;">0.979</td>
+                  <td style="padding:8px 12px;">0.963</td>
+                  <td style="padding:8px 12px;">0.971</td>
+                </tr>
+              </tbody>
+            </table>
+            <p>The 3-epoch result landed below the Wiz baseline (F1 0.818 vs 0.838). The leak had masked an undertraining problem &mdash; the model was getting bonus exposure to test records, making 3 epochs look sufficient when it wasn't. At 7 epochs on the clean split, the corrected headline: ShareSift beats Wiz's published baseline by 12.7 points in precision, 13.8 in recall, and 13.3 in F1, on ShareSift's own held-out test split. Better numbers, on a measurement that survives scrutiny.</p>
+            <p>The audit tooling, cluster-level splitter, and training contamination guard are all committed and reproducible. The training script refuses to start if the dataset path and test split path resolve to the same file. Every model output directory gets a <code>training_metadata.json</code> recording the training data SHA256, LoRA config, optimizer hyperparameters, seed, and timestamp &mdash; so anyone can verify provenance without re-running anything.</p>
+          </section>
+
+          <section>
+            <h2>Testing rules without contaminating the test</h2>
+            <p>The content classifier's data leak was a machine learning problem. But rule-based credential hunters have the same contamination problem &mdash; just hidden, because there's no explicit training set.</p>
+            <p>A rule author reads some examples, writes a regex, and validates against a benchmark drawn from the same pool of examples. The rule passes the benchmark because it memorizes it. Snaffler has 198 issues and PRs in its GitHub tracker representing five years of real operators filing "Snaffler missed X on a real engagement." Those issue threads are the closest free proxy for corporate SMB topology that doesn't require NDA access. The problem: if you use them both for rule authoring and for benchmarking, you've leaked the test set into training.</p>
+            <p>ShareSift's answer is a held-out discipline cycle. Before writing any rules that close the current generation's failures, I lock the next generation's test set from sources I haven't read yet. Rules shipped in v0.N can only reference sources that were locked at or before v0.(N-1). The just-locked generation's score is a snapshot of what the rules generalize to, not what they were trained on.</p>
+            <p>Four generations as of v0.51:</p>
+            <table style="width:100%;border-collapse:collapse;margin:16px 0;font-size:0.9em;">
+              <thead>
+                <tr style="border-bottom:2px solid currentColor;">
+                  <th style="text-align:left;padding:8px 12px;">Generation</th>
+                  <th style="text-align:left;padding:8px 12px;">Source PRs</th>
+                  <th style="text-align:left;padding:8px 12px;">Pre-rule baseline</th>
+                  <th style="text-align:left;padding:8px 12px;">Post-rule</th>
+                  <th style="text-align:left;padding:8px 12px;">Closed at</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr style="border-bottom:1px solid rgba(128,128,128,0.3);">
+                  <td style="padding:8px 12px;">v1</td>
+                  <td style="padding:8px 12px;">#78 Cisco, #135 FileZilla, #67 ADO</td>
+                  <td style="padding:8px 12px;">36%</td>
+                  <td style="padding:8px 12px;">100%</td>
+                  <td style="padding:8px 12px;">v0.49</td>
+                </tr>
+                <tr style="border-bottom:1px solid rgba(128,128,128,0.3);">
+                  <td style="padding:8px 12px;">v2</td>
+                  <td style="padding:8px 12px;">#198 CMD-set, #155 Azure CLI, #98 cred-filename, Chrome/Edge</td>
+                  <td style="padding:8px 12px;">50%</td>
+                  <td style="padding:8px 12px;">100%</td>
+                  <td style="padding:8px 12px;">v0.49</td>
+                </tr>
+                <tr style="border-bottom:1px solid rgba(128,128,128,0.3);">
+                  <td style="padding:8px 12px;">v3</td>
+                  <td style="padding:8px 12px;">#154 -password, #140 Kerberos, #139 MDE, #112 SCCM</td>
+                  <td style="padding:8px 12px;">90%&sup1;</td>
+                  <td style="padding:8px 12px;">100%</td>
+                  <td style="padding:8px 12px;">v0.50</td>
+                </tr>
+                <tr>
+                  <td style="padding:8px 12px;">v4</td>
+                  <td style="padding:8px 12px;">OPEN PRs #192 PPK, #186 SCCM-broad</td>
+                  <td style="padding:8px 12px;">60%&sup2;</td>
+                  <td style="padding:8px 12px;">70%</td>
+                  <td style="padding:8px 12px;">locked at v0.50</td>
+                </tr>
+              </tbody>
+            </table>
+            <p class="img-caption">&sup1; v3's 90% baseline reflects pysnaffler bundling upstream rules from PRs #140 and #112. Not a strict generalization test.</p>
+            <p class="img-caption">&sup2; v4 uses open PRs that pysnaffler does NOT bundle &mdash; a tighter test.</p>
+            <p>The browser-creds rule at v0.48 is the clearest generalization signal. Snaffler issue #46 described Firefox <code>logins.json</code>. I wrote <code>ShareSiftKeepFirefoxSavedCreds</code> at v0.47 for Firefox. At v0.48 I generalized to a Chromium-base meta-rule covering any browser profile's Login Data SQLite. Held-out v2 &mdash; locked before the rule was authored &mdash; contained Chrome and Edge probes I had never written rules for. Both passed. The premise generalized from Firefox to four other browsers without any additional training.</p>
+            <p>None of the major rule-based credential hunters publish an equivalent. Snaffler is upfront about it: "like all good 'ML' projects, it just uses a shitload of if statements and regexen." No CHANGELOG metrics, no held-out set, no contamination discussion. TruffleHog, Gitleaks, Kingfisher, detect-secrets &mdash; none of them publish a per-version, per-generation recall scorecard with documented held-out splits. The concept of held-out testing is ML 101. Using it as a release discipline for a rule-based credential hunter appears to be new.</p>
+          </section>
+
+          <section>
+            <h2>What a real corporate share looks like</h2>
+            <p>The benchmarks above &mdash; GitHub-mined paths, Stack Exchange extractions, Metasploitable 3 &mdash; all share a limitation: they're constructed from public data or purpose-built labs. The most honest question about any credential hunter is "how does it perform on actual Windows NTFS share content?" Up to v0.50, the closest I had was an LLM-labeled 500-path synthetic benchmark. That number always came with a caveat.</p>
+            <p>v0.51 replaces the caveat with a real corpus.</p>
+            <p>Using Stauffer's DiskForge, I built a 2525-file Windows NTFS partition: 75 synthetic-but-format-shaped credential files across 16 categories, mixed with 2420 realistic corporate-share noise files covering HR policies, finance reports, marketing assets, vendor PDFs, software install media, log archives, project source, and public templates. I added 20 precision-stress filenames designed specifically to trip credential-keyword rules &mdash; <code>password_policy.docx</code>, <code>secrets_management_guidelines.pdf</code>, and similar. The corpus is reproducible from a committed seed.</p>
+            <p>Same paths, same ground truth, both pipelines:</p>
+            <table style="width:100%;border-collapse:collapse;margin:16px 0;font-size:0.9em;">
+              <thead>
+                <tr style="border-bottom:2px solid currentColor;">
+                  <th style="text-align:left;padding:8px 12px;">Tool</th>
+                  <th style="text-align:left;padding:8px 12px;">Keep policy</th>
+                  <th style="text-align:left;padding:8px 12px;">P</th>
+                  <th style="text-align:left;padding:8px 12px;">R</th>
+                  <th style="text-align:left;padding:8px 12px;">F1</th>
+                  <th style="text-align:left;padding:8px 12px;">Caught</th>
+                  <th style="text-align:left;padding:8px 12px;">Missed</th>
+                  <th style="text-align:left;padding:8px 12px;">FPs</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr style="border-bottom:1px solid rgba(128,128,128,0.3);">
+                  <td style="padding:8px 12px;">Upstream Snaffler</td>
+                  <td style="padding:8px 12px;">Red+</td>
+                  <td style="padding:8px 12px;">0.800</td>
+                  <td style="padding:8px 12px;">0.213</td>
+                  <td style="padding:8px 12px;">0.337</td>
+                  <td style="padding:8px 12px;">16</td>
+                  <td style="padding:8px 12px;">59</td>
+                  <td style="padding:8px 12px;">4</td>
+                </tr>
+                <tr style="border-bottom:1px solid rgba(128,128,128,0.3);">
+                  <td style="padding:8px 12px;">ShareSift v0.51</td>
+                  <td style="padding:8px 12px;">Red+</td>
+                  <td style="padding:8px 12px;">0.466</td>
+                  <td style="padding:8px 12px;">0.720</td>
+                  <td style="padding:8px 12px;">0.565</td>
+                  <td style="padding:8px 12px;">54</td>
+                  <td style="padding:8px 12px;">21</td>
+                  <td style="padding:8px 12px;">62</td>
+                </tr>
+                <tr>
+                  <td style="padding:8px 12px;">ShareSift v0.51</td>
+                  <td style="padding:8px 12px;">Black-only</td>
+                  <td style="padding:8px 12px;">0.833</td>
+                  <td style="padding:8px 12px;">0.333</td>
+                  <td style="padding:8px 12px;">0.476</td>
+                  <td style="padding:8px 12px;">25</td>
+                  <td style="padding:8px 12px;">50</td>
+                  <td style="padding:8px 12px;">5</td>
+                </tr>
+              </tbody>
+            </table>
+            <p>At Red+ &mdash; the operator triage policy &mdash; ShareSift catches 3.4&times; more credentials than Snaffler (54 vs 16 of 75). The tradeoff is genuine: ShareSift surfaces 62 false positives versus Snaffler's 4. The FP volume is concentrated in binary-extension noise: <code>.msi</code>, <code>.iso</code>, and <code>.psd</code> files get probabilistic Yellow ratings from the path classifier. Document-shaped noise stays clean. If you want only findings you're certain about, Black-only gives 0.833 precision. If you don't want 59 real credentials missed silently, run Red+.</p>
+            <p>One honest caveat on these numbers. The 16 credential categories were authored to exercise every ShareSift rule generation from v0.46 to v0.50. Snaffler's defaults don't include rules for German credential filenames, CMD set "VAR=val", browser-creds meta-coverage, or several other patterns this corpus tests. A neutral-curated corpus would probably put Snaffler at 40&ndash;50% recall. The categories ShareSift covers are real corporate-share shapes &mdash; operator-reported in Snaffler's own issue tracker &mdash; so the operational gap is genuine. But category selection amplifies it.</p>
+            <figure>
+              <img src="https://vincent03dinh.wordpress.com/wp-content/uploads/2026/06/screenshot_20260610_210216.png?w=786" alt="Precision, recall and F1 bar chart on the DiskForge corpus of 2,525 files across four keep policies." style="max-width:100%;border-radius:8px;display:block;margin:16px 0;">
+              <figcaption class="img-caption">Precision / recall / F1 on the DiskForge corpus (2,525 files), by keep policy. At Red+, ShareSift trades a little precision for far higher recall.</figcaption>
+            </figure>
+          </section>
+
+          <section>
+            <h2>Results on real shares</h2>
+
+            <h3>Metasploitable 3</h3>
+            <p>1,054 enumerated paths. 40 verified ground-truth positives. Labels cross-checked by Opus and Codex with 93% agreement.</p>
+            <table style="width:100%;border-collapse:collapse;margin:16px 0;font-size:0.9em;">
+              <thead>
+                <tr style="border-bottom:2px solid currentColor;">
+                  <th style="text-align:left;padding:8px 12px;">Metric</th>
+                  <th style="text-align:left;padding:8px 12px;">Snaffler</th>
+                  <th style="text-align:left;padding:8px 12px;">ShareSift v0.51</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr style="border-bottom:1px solid rgba(128,128,128,0.3);">
+                  <td style="padding:8px 12px;">Recall</td>
+                  <td style="padding:8px 12px;">97.5% (39/40)</td>
+                  <td style="padding:8px 12px;">100% (40/40)</td>
+                </tr>
+                <tr style="border-bottom:1px solid rgba(128,128,128,0.3);">
+                  <td style="padding:8px 12px;">Top-10 precision</td>
+                  <td style="padding:8px 12px;">0.000</td>
+                  <td style="padding:8px 12px;">0.800</td>
+                </tr>
+                <tr>
+                  <td style="padding:8px 12px;">Top-20 precision</td>
+                  <td style="padding:8px 12px;">0.000</td>
+                  <td style="padding:8px 12px;">0.450</td>
+                </tr>
+              </tbody>
+            </table>
+            <p>Snaffler's 0.000 Top-10 precision is the default output sorted by Snaffler's own tier field &mdash; not a misconfiguration. The first hundred hits are Boxstarter PowerShell installer scripts firing on <code>KeepPsCredentials</code>. Even when you sort by Red tier, you still get tutorial noise before real credentials.</p>
+            <p>ShareSift's content classifier scored Boxstarter-style PowerShell at <code>P(literal credential) = 0.122</code> and pushed it to the bottom of the ranked output. The classifier that distinguishes <code>password="Ok6/FqR5="</code> from <code>password="$password"</code> is the wedge Snaffler's regex can't implement. I confirmed with a source grep across all of Snaffler's TOML rule files that there's no built-in suppression for Boxstarter-shaped false positives anywhere in the ruleset.</p>
+            <p>ShareSift also caught a Jenkins <code>master.key</code> that Snaffler's defaults missed &mdash; a genuine recall win from a blind-spot rule not in pysnaffler's bundled ruleset.</p>
+
+            <h3>Metasploitable 2</h3>
+            <p>The Linux story is starker. Snaffler's Windows-centric defaults catch 15 of 34 Linux credential files on MSF2 &mdash; 44.1% recall. ShareSift catches 34 of 34 &mdash; 100%. The gap is +55.9 percentage points. Every Snaffler catch is also a ShareSift catch. Snaffler catches nothing ShareSift misses.</p>
+            <p>The unique ShareSift catches are SSH host keys, <code>authorized_keys</code> files, <code>sudoers</code>, NFS exports, shadow file backups, Postfix config, raw MySQL user tables, and PHP config backups &mdash; credential surfaces that Snaffler's Windows-centric defaults don't cover. These came in through the v0.42 and v0.43 Linux rule expansion targeting the MSF2 gaps.</p>
+            <figure>
+              <img src="https://vincent03dinh.wordpress.com/wp-content/uploads/2026/06/image.png?w=1024" alt="ShareSift results visualization." style="max-width:100%;border-radius:8px;display:block;margin:16px 0;">
+            </figure>
+          </section>
+
+          <section>
+            <h2>The full pipeline</h2>
+            <p><strong>Drop-on-Kali binary.</strong> Starting with v0.46, ShareSift ships as a 77MB single-file binary with zero Python prerequisites:</p>
+            <pre><code>wget https://github.com/byevincent/ShareSift/releases/latest/download/sharesift
+chmod +x sharesift
+./sharesift --version</code></pre>
+            <p>The binary covers <code>score-paths</code>, <code>scan-files</code>, <code>to-snaffler-tsv</code>, <code>sort</code>, <code>query</code>, and <code>export</code>. The content classifier, SMB-direct, and live verification require the full Python install because they carry torch and smbprotocol.</p>
+            <p><strong>SMB-direct scanning, no mount required.</strong> Point ShareSift at a UNC path with credentials and it walks the share over SMB2/3 directly. Auth flags follow netexec conventions:</p>
+            <pre><code># Password auth
+uv run sharesift //10.10.10.5/Finance$ -u user -p pass
+
+# Pass-the-hash
+uv run sharesift //10.10.10.5/Finance$ -u CORP/user -H 'aad3b435b51404ee:27c4...'
+
+# Kerberos from ticket cache
+uv run sharesift //dc01.corp.local/SYSVOL$ -u alice -k --use-kcache</code></pre>
+            <p><strong>Multi-share batch scanning.</strong> Pipe netexec's share discovery into a single batch run:</p>
+            <pre><code>nxc smb 10.10.10.0/24 -u user -p pass --shares | awk '/READ/{...}' &gt; targets.txt
+sharesift batch --targets targets.txt -u user -p pass --output-dir ./engagement</code></pre>
+            <p>Each target gets its own subdirectory. Per-target failures don't abort the batch. A <code>batch_summary.jsonl</code> records success and failure per target.</p>
+            <p><strong>Live credential verification.</strong> <code>sharesift verify</code> checks credentials live against 20 verifier types: Anthropic, OpenAI, HuggingFace, GitHub, Slack, Databricks, AWS via STS GetCallerIdentity, GCP OAuth, Azure HMAC, SSH via paramiko bind, and SMB and LDAP dispatched automatically when structured parsers extract username/password pairs from files like <code>web.config</code> or <code>kubeconfig</code>. Status semantics match TruffleHog: passed, failed, inconclusive, skipped. Use <code>--dry-run</code> to see what would be verified without sending any traffic. A 3-second confirmation banner fires before live verification; suppress it with <code>--no-banner</code> for CI.</p>
+            <p><strong>Engagement datastore.</strong> One <code>engagement.db</code> per pentest holds hosts, shares, files, and hits across multi-day runs in a SQLite schema designed for incremental crawl and resume. Query it directly:</p>
+            <pre><code>sharesift query --db engagement.db --preset live-creds
+sharesift query --db engagement.db --preset writable-shares
+sharesift query --db engagement.db "SELECT host, COUNT(*) FROM hits GROUP BY host"</code></pre>
+            <p><strong>Reporting and export.</strong> <code>sharesift render-report</code> generates a single self-contained HTML report with zero external dependencies &mdash; no CDN calls, works in air-gapped environments. Sortable columns, tier and verification status filters, full-text search, row expansion for extracted credential detail and per-verifier logs.</p>
+            <p>For delivery tools, <code>sharesift export</code> emits findings in Markdown, GhostWriter CSV, or SysReptor JSON:</p>
+            <pre><code>sharesift export --db engagement.db --format ghostwriter --output findings.csv
+sharesift export --db engagement.db --format sysreptor --output sysreptor.json</code></pre>
+            <p><strong>Active learning.</strong> The report's expanded row has TP/FP/Discard buttons and a notes field. Labels persist across sessions and export as <code>labels.jsonl</code>. <code>sharesift retrain-ranker</code> joins those labels back to the original scan output and retrains a LightGBM ranker on path tier, path probability, content check result, and structured-parser confidence. Each engagement makes triage ordering better for the next one.</p>
+            <p><strong>Structured parsers.</strong> Nineteen structured parsers cover the most common credential-bearing file types: <code>.env</code>, <code>web.config</code>, <code>.aws/credentials</code>, docker <code>config.json</code>, <code>kubeconfig</code>, <code>terraform.tfstate</code>, Ansible vault, Cisco running configs, Veeam config XML, KeePass databases, and more. Parsers extract typed fields rather than raw regex matches, giving the verify stage the pairing it needs for SMB and LDAP attempts.</p>
+          </section>
+
+          <section>
+            <h2>Honest limitations</h2>
+            <p>The Wiz comparison is on ShareSift's distribution, not a shared benchmark. The 13.3-point F1 delta is on ShareSift's held-out test split. On Samsung's CredData &mdash; an externally curated benchmark that neither model was designed for &mdash; ShareSift's best content classifier reaches F1 0.853. Biringa and Kul's Mistral-7B recipe reaches 0.985. The CredData numbers are the honest external comparison. The gap is mostly model size: Mistral-7B has 4&times; the parameters of Qwen3 1.7B, and ShareSift targets a single-consumer-GPU deployment.</p>
+            <p>The DiskForge benchmark reflects ShareSift's coverage choices. The 3.4&times; recall advantage over Snaffler is on a corpus built to exercise categories ShareSift specifically added rules for. A neutral-curated benchmark would put Snaffler closer to 40&ndash;50% recall. The categories are real (operator-reported in Snaffler's own tracker), but the gap is amplified by selection.</p>
+            <p>No real engagement validation. Every benchmark here uses public data or purpose-built labs. Metasploitable 3 is a teaching VM. DiskForge uses a synthetic NTFS image. ShareSift's performance on a real corporate target is directionally supported by the lab results, not directly measured.</p>
+            <p>Calibration holds in distribution. The tier-band precision contracts (Black above 0.95 means ~95% precision) are reliable on data from the same source as training. On out-of-distribution data, the Windows model's ECE rises from 0.007 to 0.30. Treat tier assignments as triage ordering, not probability contracts, when scanning real SMB shares.</p>
+            <p>Check your pysnaffler version. The Python port's bundled rule pickle lags the C# upstream. The GPP cpassword gap found during GOAD testing is one example. Verify rule coverage against the canonical Snaffler TOML files before you deploy.</p>
+          </section>
+
+          <section>
+            <h2>Try it</h2>
+            <p>ShareSift is open-sourced at <a href="https://github.com/byevincent/ShareSift" target="_blank" rel="noreferrer">github.com/byevincent/ShareSift</a>. The quickest path to running it is the binary:</p>
+            <pre><code># Drop on Kali, no Python required
+wget https://github.com/byevincent/ShareSift/releases/latest/download/sharesift
+chmod +x sharesift
+./sharesift --version
+
+# Score paths from share enumeration
+echo "\\\\dc01\\NETLOGON\\map.bat" | ./sharesift score-paths --stdin</code></pre>
+            <p>For the full pipeline including SMB-direct and content scanning:</p>
+            <pre><code># Install with SMB-direct support
+pipx install 'sharesift[smb]'
+
+# One-shot scan of a remote share
+sharesift //10.10.10.5/Finance$ -u user -p pass
+
+# Or use individual stages for finer control
+sharesift score-paths --input paths.txt --output scored.jsonl
+sharesift scan-files --stdin --output hits.jsonl &lt; paths.txt
+sharesift verify --input hits.jsonl --output verified.jsonl --no-banner
+sharesift render-report --input verified.jsonl --output report.html</code></pre>
+            <p>The audit tooling, training scripts, eval benchmarks, and measurement infrastructure are all in the repo. Every number in this post is reproducible from committed code with pinned seeds. If a measurement doesn't hold up, open an issue.</p>
+          </section>
+
+          <p class="post-back"><a href="/">&#8592; Back to Blog</a></p>
+        </article>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <div class="container">
+        <p>&copy; EclipseSec</p>
+      </div>
+    </footer>
+
+    <script src="/js/main.js"></script>
+  </body>
+</html>
